@@ -4,6 +4,21 @@ import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { ApiError } from "../utils/apiErrors.js";
 
+const generateAccessAndRefreshToken = async (userId) => {
+  try {
+    const user = await User.findById(userId);
+    const accessToken = user.generateAccessToken();
+    const refreshToken = user.generateRefreshToken();
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
+  } catch (error) {
+    throw new ApiError(
+      500,
+      "Something went wrong while generating access and refresh token"
+    );
+  }
+};
+
 const registerUser = asyncHandler(async (req, res) => {
   const { fullName, username, email, password } = req.body;
   console.log(req.body);
@@ -61,6 +76,50 @@ const registerUser = asyncHandler(async (req, res) => {
   return res
     .status(201)
     .json(new ApiResponse(201, createdUser, "User registerd Sucessfully"));
+});
+
+const loginUser = asyncHandler(async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username && !email) {
+    throw new ApiError(400, "Username or email is required");
+  }
+  const user = await User.findOne({ $or: [{ username }, { email }] });
+
+  if (!user) {
+    throw new ApiError(404, "user not exist");
+  }
+
+  const isPasswordValid = await user.isPasswordCorrect(password);
+
+  if (!isPasswordValid) {
+    throw new ApiError(401, "Invalid user Credentials");
+  }
+
+  const { accessToken, refreshToken } = await generateAccessAndRefreshToken(
+    user._id
+  );
+
+  const loggedInUser = await User.findById(user._id).select(
+    "-password -refreshToken"
+  );
+
+  const options = {
+    httpOnly: true,
+    secure: true,
+  };
+
+  return res.status(200)
+  .cookie("accessToken",accessToken,options)
+  .cookie("refreshToken" ,refreshToken,options)
+  .json(
+    new ApiResponse(
+     200,
+     {
+      user: loggedInUser,accessToken,refreshToken
+     },
+     "User Logged In Sucessfully"
+    )
+  )
 });
 
 export { registerUser };
